@@ -13,6 +13,8 @@ import { RightPanel } from "./RightPanel";
 import { SceneBar } from "./SceneBar";
 import { SceneOverlay } from "./SceneOverlay";
 import { Toast, useToast } from "./Toast";
+import { ExportVideo } from "./ExportVideo";
+import { VideoFormat } from "@/lib/video";
 
 const LS_CFG = "lightrails.config";
 const LS_PRESETS = "lightrails.presets";
@@ -46,6 +48,7 @@ export function Studio() {
   const [sceneKey, setSceneKey] = useState(0);
   const [presets, setPresets] = useState<Preset[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [video, setVideo] = useState<VideoFormat | null>(null);
 
   /* ---- persistence ---- */
   useEffect(() => {
@@ -107,6 +110,11 @@ export function Studio() {
     catch { show({ kind: "err", title: "Clipboard blocked" }); }
   };
   const importJson = () => fileRef.current?.click();
+  const onVideoDone = (blob: Blob, ext: string) => {
+    download(blob, `light-rails-${stamp()}.${ext}`);
+    setVideo(null);
+    show({ kind: "ok", title: `${ext.toUpperCase()} saved`, sub: `${(blob.size / 1e6).toFixed(1)} MB` });
+  };
   const onFile = async (f: File | undefined) => {
     if (!f) return;
     try {
@@ -161,6 +169,13 @@ export function Studio() {
       <TopBar
         canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} onReset={reset} onRandom={shuffle}
         onExportPng={exportPng} onExportJson={exportJson} onImportJson={importJson} onCopyJson={copyJson}
+        onExportVideo={(f) => setVideo(f)}
+      />
+      <ExportVideo
+        open={video !== null} initialFormat={video ?? "mp4"} config={config}
+        stageCanvas={() => rendererRef.current?.canvas ?? null}
+        onClose={() => setVideo(null)} onDone={onVideoDone}
+        onError={(m) => show({ kind: "err", title: "Video export failed", sub: m })}
       />
       <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(e) => onFile(e.target.files?.[0])} />
 

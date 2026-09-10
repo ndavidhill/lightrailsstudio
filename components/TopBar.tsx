@@ -6,6 +6,7 @@ interface Props {
   onUndo: () => void; onRedo: () => void; onReset: () => void;
   onExportPng: () => void; onExportJson: () => void; onImportJson: () => void; onCopyJson: () => void;
   onRandom: () => void;
+  onExportVideo: (format: "mp4" | "webm") => void;
 }
 
 const Icon = {
@@ -43,6 +44,9 @@ export function TopBar(p: Props) {
         {open && (
           <div className="menu" role="menu">
             <button role="menuitem" onClick={run(p.onExportPng)}>PNG <small>current frame</small></button>
+            <button role="menuitem" onClick={run(() => p.onExportVideo("mp4"))}>MP4 video <small>loop, H.264</small></button>
+            <button role="menuitem" onClick={run(() => p.onExportVideo("webm"))}>WebM video <small>loop, VP9</small></button>
+            <hr />
             <button role="menuitem" onClick={run(p.onExportJson)}>JSON <small>settings file</small></button>
             <button role="menuitem" onClick={run(p.onCopyJson)}>Copy JSON <small>clipboard</small></button>
             <hr />

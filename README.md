@@ -24,6 +24,7 @@ Open http://localhost:3000.
 - Gradient run, timing and look controls (angle, grain, gain, blur, glow, blow-out, sway)
 - Undo / redo / reset, shuffle
 - Export PNG, export/import/copy JSON settings
+- Export looping video as MP4 (H.264) or WebM (VP9): resolution presets up to 4K, 24/30/60 fps, loop length with snap-to-period, repeats, and a seamless crossfade or straight-cut loop. Rendered offline with WebCodecs, frame-accurate; browsers without WebCodecs fall back to a realtime WebM recording
 - Saved presets (browser local storage)
 - Seven mockup scenes (hero, poster, stat board, brand spread, device, article strip) and a showreel
 

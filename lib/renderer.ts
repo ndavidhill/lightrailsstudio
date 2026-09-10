@@ -11,6 +11,7 @@ export class Renderer {
   private raf = 0;
   private start = performance.now();
   private paused = false;
+  private fixed: { w: number; h: number } | null = null;
   getConfig: () => Config;
 
   constructor(public canvas: HTMLCanvasElement, getConfig: () => Config) {
@@ -58,7 +59,16 @@ export class Renderer {
     return p;
   }
 
+  /* pin the drawing buffer to an exact size (offline rendering); the canvas
+     need not be in the document */
+  setFixedSize(w: number, h: number) {
+    this.fixed = { w, h };
+    this.canvas.width = w;
+    this.canvas.height = h;
+  }
+
   resize() {
+    if (this.fixed) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = Math.max(1, Math.round(this.canvas.clientWidth * dpr));
     const h = Math.max(1, Math.round(this.canvas.clientHeight * dpr));
