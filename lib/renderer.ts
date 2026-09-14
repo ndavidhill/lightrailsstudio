@@ -22,7 +22,8 @@ export class Renderer {
     this.prog = this.link(VERT, FRAG);
     gl.useProgram(this.prog);
     const names = [
-      "uRes", "uTime", "uShape", "uMotion", "uP1", "uP2", "uP3",
+      "uRes", "uTime", "uShape", "uMotion", "uP1", "uP2", "uP3", "uP4", "uP5", "uP6",
+      "uStopsB", "uNStopsB", "uHalves", "uSplit", "uSeamY", "uSplitDepth", "uPaint",
       "uLines", "uHeat", "uWidth", "uEdge", "uSeam", "uSeamW", "uHollow",
       "uStops", "uNStops", "uBg",
       "uRunSpeed", "uRunStretch", "uRunSpread", "uRunJitter", "uHold",
@@ -90,6 +91,7 @@ export class Renderer {
     gl.uniform1i(L.uShape, c.shape);
     gl.uniform1i(L.uMotion, c.motion);
     gl.uniform1f(L.uP1, c.p1); gl.uniform1f(L.uP2, c.p2); gl.uniform1f(L.uP3, c.p3);
+    gl.uniform1f(L.uP4, c.p4); gl.uniform1f(L.uP5, c.p5); gl.uniform1f(L.uP6, c.p6);
     gl.uniform1f(L.uLines, c.lines);
     gl.uniform1f(L.uHeat, c.heat);
     gl.uniform1f(L.uWidth, c.width);
@@ -97,14 +99,23 @@ export class Renderer {
     gl.uniform1f(L.uSeam, c.seam);
     gl.uniform1f(L.uSeamW, c.seamWidth);
     gl.uniform1f(L.uHollow, c.hollow);
-    const stops = new Float32Array(18);
-    const n = Math.min(6, Math.max(2, c.stops.length));
-    for (let i = 0; i < n; i++) {
-      const [r, g, b] = hexToRgb(c.stops[i]);
-      stops[i * 3] = r; stops[i * 3 + 1] = g; stops[i * 3 + 2] = b;
-    }
-    gl.uniform3fv(L.uStops, stops);
-    gl.uniform1i(L.uNStops, n);
+    const pack = (hexes: string[]) => {
+      const arr = new Float32Array(18);
+      const n = Math.min(6, Math.max(2, hexes.length));
+      for (let i = 0; i < n; i++) {
+        const [r, g, b] = hexToRgb(hexes[i]);
+        arr[i * 3] = r; arr[i * 3 + 1] = g; arr[i * 3 + 2] = b;
+      }
+      return { arr, n };
+    };
+    const A = pack(c.stops), B = pack(c.stopsB);
+    gl.uniform3fv(L.uStops, A.arr); gl.uniform1i(L.uNStops, A.n);
+    gl.uniform3fv(L.uStopsB, B.arr); gl.uniform1i(L.uNStopsB, B.n);
+    gl.uniform1i(L.uHalves, c.halves ? 1 : 0);
+    gl.uniform1i(L.uSplit, c.split);
+    gl.uniform1f(L.uSeamY, c.seamY);
+    gl.uniform1f(L.uSplitDepth, c.splitDepth);
+    gl.uniform1f(L.uPaint, c.paint);
     gl.uniform3fv(L.uBg, new Float32Array(hexToRgb(c.bg)));
     gl.uniform1f(L.uRunSpeed, c.runSpeed);
     gl.uniform1f(L.uRunStretch, c.runStretch);

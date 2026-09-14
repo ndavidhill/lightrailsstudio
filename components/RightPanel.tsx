@@ -1,6 +1,6 @@
 "use client";
-import { Config, Motion, SHAPES } from "@/lib/config";
-import { Section, SelectRow, Slider } from "./Controls";
+import { Config, Motion, SHAPES, Split } from "@/lib/config";
+import { Section, SelectRow, Slider, Switch } from "./Controls";
 
 interface Props {
   open: boolean;
@@ -12,6 +12,37 @@ interface Props {
 }
 
 type NumKey = { [K in keyof Config]: Config[K] extends number ? K : never }[keyof Config];
+const PARAM_KEYS = ["p1", "p2", "p3", "p4", "p5", "p6"] as const;
+
+/* one row of colour stops with add / remove */
+function StopRow({ stops, label, set, apply }: {
+  stops: string[]; label: string;
+  set: (stops: string[]) => void; apply: (stops: string[]) => void;
+}) {
+  const change = (i: number, v: string, done: boolean) => {
+    const next = stops.slice(); next[i] = v;
+    done ? apply(next) : set(next);
+  };
+  return (
+    <div className="stops">
+      {stops.map((s, i) => (
+        <span className="stop" key={i}>
+          <input type="color" value={s} aria-label={`${label} stop ${i + 1}`}
+            onInput={(e) => change(i, (e.target as HTMLInputElement).value, false)}
+            onChange={(e) => change(i, e.target.value, true)} />
+          {stops.length > 2 && (
+            <button className="rm" title="remove stop" aria-label={`remove ${label} stop ${i + 1}`}
+              onClick={() => apply(stops.filter((_, j) => j !== i))}>×</button>
+          )}
+        </span>
+      ))}
+      {stops.length < 6 && (
+        <button className="add-stop" title="add a colour stop" aria-label={`add ${label} stop`}
+          onClick={() => apply([...stops, stops[0]])}>+</button>
+      )}
+    </div>
+  );
+}
 
 export function RightPanel({ open, onClose, config: c, set, commit, apply }: Props) {
   const S = (label: string, key: NumKey, min: number, max: number, step: number, fmt?: (v: number) => string) => (
@@ -19,12 +50,7 @@ export function RightPanel({ open, onClose, config: c, set, commit, apply }: Pro
       onChange={(v) => set({ [key]: v } as Partial<Config>)} onCommit={commit} />
   );
   const shape = SHAPES[c.shape];
-  const params = (["p1", "p2", "p3"] as const).filter((_, i) => shape.params[i]);
-
-  const setStop = (i: number, v: string, done: boolean) => {
-    const stops = c.stops.slice(); stops[i] = v;
-    done ? apply({ stops }) : set({ stops });
-  };
+  const params = PARAM_KEYS.map((k, i) => [k, shape.params[i] ?? ""] as const).filter(([, label]) => label);
 
   return (
     <aside className={"pane pane-right" + (open ? "" : " closed")} aria-label="Rail controls" aria-hidden={!open}>
@@ -40,7 +66,7 @@ export function RightPanel({ open, onClose, config: c, set, commit, apply }: Pro
             { value: "1", label: "Solid — always lit, colours loop" },
             { value: "0", label: "Pulse — all rails breathe together" },
           ]} />
-        {params.map((k, i) => S(shape.params[(["p1", "p2", "p3"] as const).indexOf(k)], k, 0, 1, 0.01))}
+        {params.map(([k, label]) => S(label, k, 0, 1, 0.01))}
         {params.length === 0 && <div className="hint">This shape has no extra parameters.</div>}
       </Section>
 
@@ -54,31 +80,32 @@ export function RightPanel({ open, onClose, config: c, set, commit, apply }: Pro
         {S("hollow", "hollow", 0, 1, 0.01)}
       </Section>
 
-      <Section title="Gradient colours">
-        <div className="stops">
-          {c.stops.map((s, i) => (
-            <span className="stop" key={i}>
-              <input type="color" value={s} aria-label={`colour stop ${i + 1}`}
-                onInput={(e) => setStop(i, (e.target as HTMLInputElement).value, false)}
-                onChange={(e) => setStop(i, e.target.value, true)} />
-              {c.stops.length > 2 && (
-                <button className="rm" title="remove stop" aria-label={`remove stop ${i + 1}`}
-                  onClick={() => apply({ stops: c.stops.filter((_, j) => j !== i) })}>×</button>
-              )}
-            </span>
-          ))}
-          {c.stops.length < 6 && (
-            <button className="add-stop" title="add a colour stop" aria-label="add colour stop"
-              onClick={() => apply({ stops: [...c.stops, c.stops[0]] })}>+</button>
-          )}
-        </div>
+      <Section title="Gradient colours"
+        action={<label className="halves-toggle">halves <Switch on={c.halves} label="Colour halves: pack A above the seam, pack B below" onChange={(v) => apply({ halves: v })} /></label>}>
+        {c.halves && <div className="pack-label">pack A · above the seam</div>}
+        <StopRow stops={c.stops} label="pack A" set={(stops) => set({ stops })} apply={(stops) => apply({ stops })} />
+        {c.halves && (
+          <>
+            <div className="pack-label">pack B · below the seam</div>
+            <StopRow stops={c.stopsB} label="pack B" set={(stopsB) => set({ stopsB })} apply={(stopsB) => apply({ stopsB })} />
+            <SelectRow label="split" value={String(c.split)} onChange={(v) => apply({ split: +v as Split })}
+              options={[
+                { value: "0", label: "Seam — hard split at the seam" },
+                { value: "1", label: "Interleave — packs bind across the seam" },
+                { value: "2", label: "Gradient — cross-fade over the zone" },
+                { value: "3", label: "Mono — pack A everywhere" },
+              ]} />
+            {S("seam position", "seamY", 0.18, 0.82, 0.005)}
+            {c.split === 1 || c.split === 2 ? S(c.split === 1 ? "bind depth" : "blend width", "splitDepth", 0, 1, 0.01) : null}
+          </>
+        )}
         <div className="bg-row">
           <span className="stop">
             <input type="color" value={c.bg} aria-label="background colour"
               onInput={(e) => set({ bg: (e.target as HTMLInputElement).value })}
               onChange={(e) => apply({ bg: e.target.value })} />
           </span>
-          <span>background</span>
+          <span>{c.halves ? "ground" : "background"}</span>
         </div>
       </Section>
 
@@ -96,6 +123,7 @@ export function RightPanel({ open, onClose, config: c, set, commit, apply }: Pro
       </Section>
 
       <Section title="Look">
+        {S("paint", "paint", 0, 1, 0.01)}
         {S("angle°", "angle", -180, 180, 1)}
         {S("grain", "grain", 0, 0.25, 0.005)}
         {S("gain", "gain", 0.1, 3, 0.01)}

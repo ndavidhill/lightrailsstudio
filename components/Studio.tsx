@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Config, DEFAULTS, SCENES, SHAPES, TEMPLATES, THEMES, Template,
-  applyTemplate, cloneConfig, coerceConfig,
+  applyTemplate, cloneConfig, coerceConfig, isLight,
 } from "@/lib/config";
 import { Renderer } from "@/lib/renderer";
 import { useHistory } from "@/lib/useHistory";
@@ -77,14 +77,18 @@ export function Studio() {
   const commitNow = useCallback(() => commit(cfgRef.current), [commit]);
   const applyPatch = useCallback((p: Partial<Config>) => apply({ ...cfgRef.current, ...p }), [apply]);
   const useTemplate = useCallback((t: Template) => apply(applyTemplate(cfgRef.current, t.cfg)), [apply]);
-  const useTheme = (i: number) => applyPatch({ stops: THEMES[i].stops.slice(), bg: THEMES[i].bg });
+  const useTheme = (i: number) => {
+    const th = THEMES[i];
+    applyPatch({ stops: th.stops.slice(), bg: th.bg, ...(th.stopsB ? { stopsB: th.stopsB.slice() } : {}) });
+  };
   const reset = () => { apply(cloneConfig(DEFAULTS)); show({ kind: "ok", title: "Reset to defaults" }); };
   const shuffle = () => {
     const th = THEMES[Math.floor(Math.random() * THEMES.length)];
     applyPatch({
       shape: Math.floor(Math.random() * SHAPES.length),
       p1: Math.random(), p2: Math.random(), p3: Math.random(),
-      stops: th.stops.slice(), bg: th.bg,
+      p4: Math.random(), p5: Math.random(), p6: Math.random(),
+      stops: th.stops.slice(), bg: th.bg, ...(th.stopsB ? { stopsB: th.stopsB.slice() } : {}),
       lines: 6 + Math.round(Math.random() * 18),
       angle: Math.random() < 0.5 ? 0 : Math.round((Math.random() - 0.5) * 90),
     });
@@ -180,7 +184,7 @@ export function Studio() {
       <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(e) => onFile(e.target.files?.[0])} />
 
       <Stage configRef={cfgRef} rendererRef={rendererRef}>
-        {uiOn && <SceneOverlay scene={scene} keyId={sceneKey} />}
+        {uiOn && <SceneOverlay scene={scene} keyId={sceneKey} seamY={config.seamY} light={isLight(config.bg)} />}
       </Stage>
 
       <LeftPanel

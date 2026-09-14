@@ -37,7 +37,8 @@ export function LeftPanel(p: Props) {
         <div className="orbs">
           {THEMES.map((t, i) => (
             <button key={t.name} className={"orb" + (i === themeOn ? " on" : "")} title={t.name} aria-label={t.name}
-              style={{ background: swatch(t.stops) }} onClick={() => p.onTheme(i)} />
+              style={{ background: t.stopsB ? `linear-gradient(180deg, ${t.stops[0]} 0 50%, ${t.stopsB[0]} 50% 100%)` : swatch(t.stops) }}
+              onClick={() => p.onTheme(i)} />
           ))}
         </div>
       </Section>

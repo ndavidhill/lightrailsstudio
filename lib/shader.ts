@@ -17,11 +17,16 @@ uniform vec2  uRes;
 uniform float uTime;
 uniform int   uShape;
 uniform int   uMotion;
-uniform float uP1, uP2, uP3;
+uniform float uP1, uP2, uP3, uP4, uP5, uP6;
 uniform float uLines, uHeat, uWidth, uEdge, uSeam, uSeamW, uHollow;
 uniform vec3  uStops[6];
 uniform int   uNStops;
+uniform vec3  uStopsB[6];
+uniform int   uNStopsB;
 uniform vec3  uBg;
+uniform int   uHalves;
+uniform int   uSplit;
+uniform float uSeamY, uSplitDepth, uPaint;
 uniform float uRunSpeed, uRunStretch, uRunSpread, uRunJitter, uHold;
 uniform float uPeriod, uLife;
 uniform float uAngle, uGrain, uGain, uBlur, uGlow, uBlow, uSway;
@@ -34,13 +39,93 @@ float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453)
 
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
 
-vec3 grad(float x) {
-  float f = fract(x) * float(uNStops);
+/* gradient lookup for pack 0 (A) or 1 (B) */
+vec3 gradN(float x, int pack) {
+  int n = pack == 0 ? uNStops : uNStopsB;
+  float f = fract(x) * float(n);
   int i = int(floor(f));
+  int j = (i + 1) % n;
   float k = smoothstep(0.0, 1.0, fract(f));
-  vec3 a = uStops[i];
-  vec3 b = uStops[(i + 1) % uNStops];
+  vec3 a = pack == 0 ? uStops[i] : uStopsB[i];
+  vec3 b = pack == 0 ? uStops[j] : uStopsB[j];
   return mix(a, b, k);
+}
+
+/* which pack colours this fragment: 0 = A, 1 = B, fractional in gradient mode.
+   side: signed distance above (+) / below (-) the seam; idx: rail index */
+float packMix(float side, float idx) {
+  if (uHalves == 0 || uSplit == 3) return 0.0;
+  float below = side < 0.0 ? 1.0 : 0.0;
+  if (uSplit == 0) return below;
+  float d = uSplitDepth * 0.6 + 0.005;
+  if (uSplit == 2) return 1.0 - smoothstep(-d, d, side);
+  // interleave: inside the band the packs alternate rail by rail so both
+  // colours bind at the contact point
+  if (abs(side) < d) return mod(idx, 2.0);
+  return below;
+}
+
+/* ---- The Bind ------------------------------------------------------------
+   Two strand families at ±angle in an UNWARPED space; the fragment's warped
+   position is mapped back by inverting the compression cubic
+   g(t) = t (a + (1 - a) t²), whose slope is 1 at the flanks and a at the seam,
+   so the lattice keeps its angle at the edge and only its scale changes. */
+vec3 bind(vec2 p, out float wmul) {
+  float seamP = 1.0 - 2.0 * uSeamY;
+  float ang   = radians(mix(12.0, 68.0, uP1));
+  float comp  = clamp(uP2 + 0.035 * sin(uTime * TAU / 7.5), 0.0, 1.0); // breathe
+  float taper = uP3;
+  float tun   = uP4 * 0.45;
+  float conv  = uP5 * 0.8;
+  float shear = (uP6 - 0.5) * 0.5;
+
+  float y   = p.y - seamP;
+  float sgn = y < 0.0 ? -1.0 : 1.0;
+  float ay  = abs(y);
+  float mask = smoothstep(tun, tun + 0.004, ay);            // the tunnel cuts strands
+
+  float G = max(0.0, (ay - tun) / (1.0 - tun));            // 0 at the channel, 1 at the edge
+  float a = 1.0 - comp * 0.9;
+  float tEdge = 0.62;
+  float gEdge = tEdge * (a + (1.0 - a) * tEdge * tEdge);
+  float target = G * gEdge;
+  float t = target;
+  for (int i = 0; i < 4; i++) {                             // Newton: g(t) = target
+    float gt = t * (a + (1.0 - a) * t * t);
+    float dg = a + 3.0 * (1.0 - a) * t * t;
+    t -= (gt - target) / dg;
+  }
+  float k = (a + 3.0 * (1.0 - a) * t * t) / (a + 3.0 * (1.0 - a) * tEdge * tEdge); // local scale vs edge
+  float yIn = t / gEdge;
+
+  float Gc = min(G, 1.0);
+  float xs = p.x - shear * sgn * (1.0 - 0.4 * Gc);          // undo the heave
+  float x  = xs / (1.0 - conv * pow(1.0 - Gc, 1.7));         // undo the converge
+  vec2 q = vec2(x, sgn * yIn);
+
+  // strand width follows compression by taper: 1 = self-similar braid,
+  // 0 = constant width (merges into a solid band at the seam)
+  float wFloor = 1.0 - taper;
+  wmul = (wFloor + (1.0 - wFloor) * k) / max(k, 0.02);
+  float w = min(uWidth * wmul, 1.0);
+
+  vec2 nA = vec2(-sin(ang), cos(ang));
+  vec2 nB = vec2( sin(ang), cos(ang));
+  float phase = sgn < 0.0 ? 0.5 : 0.0;                      // pack B half a pitch out
+  float tA = dot(q, nA) * 0.5 + 0.5 + phase / uLines;
+  float tB = dot(q, nB) * 0.5 + 0.5;
+  float sA = tA * uLines, sB = tB * uLines;
+  float dA = abs(fract(sA) - 0.5) * 2.0;
+  float dB = abs(fract(sB) - 0.5) * 2.0;
+  bool inA = dA < w, inB = dB < w;
+  float par = mod(floor(sA) + floor(sB), 2.0);              // A on top at even crossings
+  float useA;
+  if (inA && inB)      useA = par < 0.5 ? 1.0 : 0.0;
+  else if (inA)        useA = 1.0;
+  else if (inB)        useA = 0.0;
+  else                 useA = dA < dB ? 1.0 : 0.0;
+  // u encodes the family so a two-stop gradient gives over / under colours
+  return useA > 0.5 ? vec3(tA, 0.0, mask) : vec3(tB, 0.5, mask);
 }
 
 /* fan helper: rails converge on focus f, measured as angle around it */
@@ -50,13 +135,17 @@ vec3 fan(vec2 p, vec2 f, float spread) {
   return vec3(ang / spread + 0.5, length(d) / 2.6, 1.0);
 }
 
-/* returns (t, u, mask); t2 is a second rail family (grid) or -1 */
-vec3 shape(vec2 p, out float t2) {
+/* returns (t, u, mask); t2 is a second rail family (grid) or -1; wmul scales
+   the rail width per fragment (only The Bind uses it) */
+vec3 shape(vec2 p, out float t2, out float wmul) {
   t2 = -1.0;
+  wmul = 1.0;
   float a = uP1, b = uP2, c = uP3;
   float r = length(p);
   float th = atan(p.x, p.y);
   float tm = uTime;
+
+  if (uShape == 24) return bind(p, wmul);
 
   if (uShape == 0) {            // perspective fan
     p.x += p.y * (c - 0.5) * 0.8;
@@ -227,11 +316,11 @@ float envelope(float u, float idx) {
 }
 
 /* halo, core, seam and glow profile for one rail family */
-void rail(float t, float u, out float halo, out float core, out float glow, out float seam, out float env, out vec3 col) {
+void rail(float t, float u, float w, float side,
+          out float halo, out float core, out float glow, out float seam, out float env, out vec3 col) {
   float s = t * uLines;
   float idx = floor(s);
   float d = abs(fract(s) - 0.5) * 2.0;           // 0 at rail centre, 1 in the gap
-  float w = uWidth;
   halo = pow(max(0.0, 1.0 - d / w), uEdge);
   halo *= mix(1.0, smoothstep(0.0, w * 0.6, d), uHollow);
   core = exp(-(d * d) / (w * w * 0.06));
@@ -239,25 +328,32 @@ void rail(float t, float u, out float halo, out float core, out float glow, out 
   seam = 1.0 - smoothstep(uSeamW * 0.6, uSeamW * 1.6, d);
   env = envelope(u, idx);
   float phase = uTime * uRunSpeed * 0.25 + idx * uRunSpread * 0.05 + hash(idx) * uRunJitter;
-  col = grad(u * uRunStretch * 2.0 - phase);
+  float x = u * uRunStretch * 2.0 - phase;
+  float pm = packMix(side, idx);
+  col = pm <= 0.0 ? gradN(x, 0) : pm >= 1.0 ? gradN(x, 1) : mix(gradN(x, 0), gradN(x, 1), pm);
 }
 
 void main() {
   vec2 frag = gl_FragCoord.xy;
   vec2 p = (frag - 0.5 * uRes) / uRes.y * 2.0;
   p += vec2(sin(uTime * 0.7), cos(uTime * 0.5)) * uSway;
+  float side = p.y - (1.0 - 2.0 * uSeamY);       // halves stay horizontal under rotation
+  // the interleave / gradient band starts at the tunnel edge, not the seam
+  float tunnelP = uShape == 24 ? uP4 * 0.45 : 0.0;
+  side = sign(side) * max(abs(side) - tunnelP, 0.0);
   p = rot(radians(uAngle)) * p;
 
-  float t2;
-  vec3 su = shape(p, t2);
+  float t2, wmul;
+  vec3 su = shape(p, t2, wmul);
   float mask = su.z;
+  float w = min(uWidth * wmul, 1.0);
 
   float halo, core, glow, seam, env; vec3 col;
-  rail(su.x, su.y, halo, core, glow, seam, env, col);
+  rail(su.x, su.y, w, side, halo, core, glow, seam, env, col);
 
   if (t2 >= 0.0) {
     float h2, c2, g2, s2, e2; vec3 col2;
-    rail(t2, su.y, h2, c2, g2, s2, e2, col2);
+    rail(t2, su.y, uWidth, side, h2, c2, g2, s2, e2, col2);
     // union of both families, weighted by their envelopes
     float w1 = halo * env, w2 = h2 * e2;
     col = (w1 + w2) > 0.0 ? (col * w1 + col2 * w2) / (w1 + w2) : col;
@@ -266,16 +362,25 @@ void main() {
   }
 
   vec3 railCol = col * uGain;
-  vec3 c = uBg;
   float e = env * mask;
-  c += railCol * halo * e;
-  c += railCol * glow * uGlow * 0.55 * e;
   vec3 hot = mix(railCol, vec3(1.0), uBlow);
-  c += hot * core * uHeat * 1.6 * e;
-  c -= (c - uBg) * seam * uSeam * core * e;
 
-  // gentle shoulder so blown-out cores roll off instead of clipping flat
-  c = mix(c, 1.0 - exp(-c * 1.4), 0.35);
+  // additive: light on a dark ground
+  vec3 add = uBg;
+  add += railCol * halo * e;
+  add += railCol * glow * uGlow * 0.55 * e;
+  add += hot * core * uHeat * 1.6 * e;
+  add -= (add - uBg) * seam * uSeam * core * e;
+  add = mix(add, 1.0 - exp(-add * 1.4), 0.35);   // gentle shoulder for blown-out cores
+
+  // paint: opaque colour on any ground (the ink print look)
+  float cov = clamp(halo * e, 0.0, 1.0);
+  vec3 ink = mix(uBg, railCol, cov);
+  ink = mix(ink, railCol, clamp(glow * uGlow * 0.35 * e, 0.0, 1.0) * (1.0 - cov));
+  ink = mix(ink, hot, clamp(core * uHeat * e, 0.0, 1.0));
+  ink -= (ink - uBg) * seam * uSeam * core * e;
+
+  vec3 c = mix(add, ink, uPaint);
   c += (hash2(frag + fract(uTime) * 100.0) - 0.5) * uGrain;
   outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }

@@ -2,6 +2,9 @@
    Everything the renderer and the panels agree on lives here. */
 
 export type Motion = 0 | 1 | 2; // 0 pulse, 1 solid, 2 trails
+export type Split = 0 | 1 | 2 | 3; // 0 seam, 1 interleave, 2 gradient, 3 mono
+
+export const BIND = 24; // shape index of The Bind
 
 export interface Config {
   shape: number;
@@ -10,6 +13,9 @@ export interface Config {
   p1: number;
   p2: number;
   p3: number;
+  p4: number;
+  p5: number;
+  p6: number;
   // lines
   lines: number;
   heat: number;
@@ -21,6 +27,12 @@ export interface Config {
   // colour
   stops: string[];
   bg: string;
+  // colour halves: pack A (stops) above the seam, pack B (stopsB) below
+  halves: boolean;
+  stopsB: string[];
+  split: Split;
+  seamY: number;       // seam position, fraction from the top (0.18..0.82)
+  splitDepth: number;  // interleave band / gradient blend width (0..1)
   // gradient run
   runSpeed: number;
   runStretch: number;
@@ -38,12 +50,13 @@ export interface Config {
   glow: number;
   blow: number;
   sway: number;
+  paint: number;       // 0 = additive light on dark, 1 = opaque paint on ground
 }
 
 export interface ShapeDef {
   name: string;
   hint: string;
-  params: [string, string, string]; // labels for p1..p3 ("" = unused)
+  params: string[]; // labels for p1..p6 ("" = unused)
   defaults?: Partial<Config>;
 }
 
@@ -72,12 +85,19 @@ export const SHAPES: ShapeDef[] = [
   { name: "Diamond lattice", hint: "tiled diamond cells", params: ["cell size", "rotate", ""] },
   { name: "Vortex", hint: "rays twisted by radius", params: ["twist", "spin", ""] },
   { name: "Ellipse foci", hint: "rings drawn around two foci", params: ["separation", "rotate", ""] },
+  {
+    name: "The Bind",
+    hint: "two strand packs compressing toward a seam; a top-down scrum",
+    params: ["strand angle", "compression", "taper", "tunnel", "converge", "shear"],
+    // spec defaults: 45°, compression 0.86, taper 0.85, no tunnel, no converge, shear centred
+    defaults: { p1: 0.589, p2: 0.86, p3: 0.85, p4: 0, p5: 0, p6: 0.5 },
+  },
 ];
 
 export const DEFAULTS: Config = {
   shape: 0,
   motion: 2,
-  p1: 0.35, p2: 0.5, p3: 0.5,
+  p1: 0.35, p2: 0.5, p3: 0.5, p4: 0.5, p5: 0.5, p6: 0.5,
   lines: 12,
   heat: 0.7,
   width: 0.42,
@@ -87,6 +107,11 @@ export const DEFAULTS: Config = {
   hollow: 0,
   stops: ["#ff4a00", "#8a63ff", "#214aff"],
   bg: "#05060a",
+  halves: false,
+  stopsB: ["#ff2d55", "#ffb3c1", "#c8102e"],
+  split: 0,
+  seamY: 0.5,
+  splitDepth: 0.25,
   runSpeed: 1.0,
   runStretch: 0.5,
   runSpread: 1.2,
@@ -101,9 +126,10 @@ export const DEFAULTS: Config = {
   glow: 0.6,
   blow: 0.5,
   sway: 0.008,
+  paint: 0,
 };
 
-export interface Theme { name: string; stops: string[]; bg: string }
+export interface Theme { name: string; stops: string[]; bg: string; stopsB?: string[] }
 
 export const THEMES: Theme[] = [
   { name: "Ember", stops: ["#ff4a00", "#8a63ff", "#214aff"], bg: "#05060a" },
@@ -116,9 +142,20 @@ export const THEMES: Theme[] = [
   { name: "Acid", stops: ["#c8ff3a", "#00ffa3", "#00c2ff"], bg: "#040a06" },
   { name: "Rose gold", stops: ["#ffd9c4", "#ff8fa3", "#b56cff"], bg: "#0b0509" },
   { name: "Mono", stops: ["#ffffff", "#9aa0ad", "#ffffff"], bg: "#070708" },
+  { name: "Home / away", stops: ["#2540ef", "#aef6ff"], stopsB: ["#c8102e", "#ffd9df"], bg: "#ffffff" },
 ];
 
 export interface Template { name: string; title: string; cfg: Partial<Config> }
+
+/* shared base for the flat-colour Bind presets from the spec */
+const BIND_FLAT: Partial<Config> = {
+  shape: BIND, motion: 1,
+  p1: 0.589, p2: 0.86, p3: 0.85, p4: 0, p5: 0, p6: 0.5,
+  lines: 10, width: 0.24, heat: 0, edge: 0.2, seam: 0, hollow: 0,
+  stops: ["#2540ef", "#aef6ff"], stopsB: ["#c8102e", "#ffd9df"], bg: "#ffffff",
+  halves: true, split: 0, seamY: 0.5, splitDepth: 0.25,
+  runSpeed: 0, runStretch: 0.5, angle: 0, grain: 0, gain: 1, blur: 0.02, glow: 0, blow: 0, sway: 0, paint: 1,
+};
 
 export const TEMPLATES: Template[] = [
   { name: "measured fan", title: "Perspective fan, the studio default", cfg: { shape: 0, motion: 2 } },
@@ -133,6 +170,12 @@ export const TEMPLATES: Template[] = [
   { name: "tunnel", title: "Rings drifting off centre", cfg: { shape: 6, motion: 2, p1: 0.7, p2: 0.4, p3: 0.5, lines: 12, stops: ["#a9efad", "#96a0e0", "#eef6c8"], bg: "#061008" } },
   { name: "lattice", title: "Tiled diamond cells", cfg: { shape: 21, motion: 0, p1: 0.4, p2: 0.0, lines: 6, stops: ["#ffffff", "#9aa0ad", "#ffffff"], bg: "#070708", period: 2.5 } },
   { name: "foci", title: "Rings around two foci", cfg: { shape: 23, motion: 1, p1: 0.5, p2: 0.15, lines: 16, stops: ["#00d4c8", "#6a5cff", "#ff3a6a"], bg: "#03060d" } },
+  { name: "versus", title: "The Bind: two packs locked at the seam (interleave)", cfg: { ...BIND_FLAT, p4: 0.41, halves: true, split: 1, splitDepth: 0.25 } },
+  { name: "neutral field", title: "The Bind: competition-neutral mono weave", cfg: { ...BIND_FLAT, halves: false } },
+  { name: "broadcast bar", title: "The Bind at 19°: wide flat lattice with a channel", cfg: { ...BIND_FLAT, p1: 0.125, p3: 0.55, p4: 0.24, lines: 11, halves: true, split: 0 } },
+  { name: "try moment", title: "The Bind: loosened, converging, colours cross-fading", cfg: { ...BIND_FLAT, p2: 0.6, p5: 0.475, halves: true, split: 2, splitDepth: 0.5 } },
+  { name: "apparel", title: "The Bind: fine self-similar braid for textures", cfg: { ...BIND_FLAT, lines: 16, width: 0.22, p3: 1.0, halves: false } },
+  { name: "neon bind", title: "The Bind with the rails light treatment", cfg: { shape: BIND, motion: 1, p1: 0.589, p2: 0.86, p3: 0.85, p4: 0.3, p5: 0, p6: 0.5, lines: 10, width: 0.3, halves: true, split: 1, splitDepth: 0.25, stops: ["#3aa0ff", "#dff6ff"], stopsB: ["#ff3a6a", "#ffd9df"], bg: "#05060a", paint: 0, runSpeed: 0 } },
 ];
 
 export interface Scene { id: string; name: string; hold: number }
@@ -145,9 +188,15 @@ export const SCENES: Scene[] = [
   { id: "brand", name: "Brand spread", hold: 7200 },
   { id: "device", name: "Device", hold: 6400 },
   { id: "article", name: "Article strip", hold: 5400 },
+  { id: "versus", name: "Versus", hold: 6000 },
 ];
 
 /* ---- helpers ------------------------------------------------------------ */
+
+export function isLight(hex: string): boolean {
+  const [r, g, b] = hexToRgb(hex);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5;
+}
 
 export function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace("#", "");
@@ -157,11 +206,11 @@ export function hexToRgb(hex: string): [number, number, number] {
 
 export function applyTemplate(base: Config, t: Partial<Config>): Config {
   const shapeDefaults = t.shape != null ? SHAPES[t.shape]?.defaults ?? {} : {};
-  return { ...base, ...shapeDefaults, ...t, stops: (t.stops ?? base.stops).slice() };
+  return { ...base, ...shapeDefaults, ...t, stops: (t.stops ?? base.stops).slice(), stopsB: (t.stopsB ?? base.stopsB).slice() };
 }
 
 export function cloneConfig(c: Config): Config {
-  return { ...c, stops: c.stops.slice() };
+  return { ...c, stops: c.stops.slice(), stopsB: c.stopsB.slice() };
 }
 
 export function sameConfig(a: Config, b: Config): boolean {
@@ -176,10 +225,12 @@ export function coerceConfig(raw: unknown): Config | null {
   for (const k of Object.keys(DEFAULTS) as (keyof Config)[]) {
     const v = r[k];
     if (v == null) continue;
-    if (k === "stops") {
+    if (k === "stops" || k === "stopsB") {
       if (Array.isArray(v) && v.every((s) => typeof s === "string" && /^#[0-9a-f]{6}$/i.test(s)) && v.length >= 2 && v.length <= 6) {
-        out.stops = v.slice();
+        out[k] = v.slice();
       }
+    } else if (k === "halves") {
+      out.halves = !!v;
     } else if (k === "bg") {
       if (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v)) out.bg = v;
     } else if (typeof v === "number" && Number.isFinite(v)) {
@@ -188,5 +239,6 @@ export function coerceConfig(raw: unknown): Config | null {
   }
   out.shape = Math.max(0, Math.min(SHAPES.length - 1, Math.round(out.shape)));
   out.motion = ([0, 1, 2].includes(out.motion) ? out.motion : 2) as Motion;
+  out.split = ([0, 1, 2, 3].includes(out.split) ? out.split : 0) as Split;
   return out;
 }

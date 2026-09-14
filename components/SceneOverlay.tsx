@@ -3,10 +3,12 @@
 /* Mockup overlays: HTML placed over the live pattern so the same artwork can
    be previewed as a hero, a poster, a device screen and so on. Pointer events
    pass through; the pattern stays interactive underneath. */
-export function SceneOverlay({ scene, keyId }: { scene: string; keyId: number }) {
+interface Props { scene: string; keyId: number; seamY: number; light: boolean }
+
+export function SceneOverlay({ scene, keyId, seamY, light }: Props) {
   if (scene === "pattern") return null;
   return (
-    <div className="overlay fade" key={keyId} aria-hidden>
+    <div className={"overlay fade" + (light ? " on-light" : "")} key={keyId} aria-hidden>
       {scene === "hero" && (
         <div className="ov-hero">
           <h1>Draw with light.<br />Brand with it.</h1>
@@ -49,6 +51,15 @@ export function SceneOverlay({ scene, keyId }: { scene: string; keyId: number })
             <span>Your studio, one tap away.</span>
             <span className="ov-pill">Continue</span>
           </div>
+        </div>
+      )}
+      {scene === "versus" && (
+        // the tunnel is the only content slot: knot on the seam, sides either way.
+        // The knot is always competition navy, never a club colour.
+        <div className="ov-versus" style={{ top: `${seamY * 100}%` }}>
+          <span className="team home">Home</span>
+          <span className="knot">VS</span>
+          <span className="team away">Away</span>
         </div>
       )}
       {scene === "article" && (
