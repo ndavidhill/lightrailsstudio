@@ -57,6 +57,7 @@ export function ExportVideo(p: Props) {
 
   const period = p.config.period;
   const runPeriod = p.config.runSpeed > 0 ? 4 / p.config.runSpeed : 0;
+  const morphCycle = p.config.morphSeconds * 2;
   const est = estimateBytes({ width: dims.w, height: dims.h, fps, seconds, repeats, quality });
   const noWebcodecs = support && !support.webcodecs;
   const formatOk = !support || (format === "mp4" ? support.mp4 : support.webm);
@@ -139,6 +140,7 @@ export function ExportVideo(p: Props) {
           <button disabled={busy} onClick={() => setSeconds(+period.toFixed(2))}>period {period.toFixed(2)}s</button>
           <button disabled={busy} onClick={() => setSeconds(+(period * 2).toFixed(2))}>2× period</button>
           {runPeriod > 0 && runPeriod <= 60 && <button disabled={busy} onClick={() => setSeconds(+runPeriod.toFixed(2))}>gradient run {runPeriod.toFixed(2)}s</button>}
+          {p.config.morph && p.config.morphTo && morphCycle <= 60 && <button disabled={busy} onClick={() => setSeconds(+morphCycle.toFixed(2))}>morph A→B→A {morphCycle.toFixed(2)}s</button>}
         </div>
         <div className="seg" role="radiogroup" aria-label="Loop mode">
           <button role="radio" aria-checked={loop === "crossfade"} className={loop === "crossfade" ? "on" : ""} disabled={busy || !!noWebcodecs} onClick={() => setLoop("crossfade")}>

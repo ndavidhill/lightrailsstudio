@@ -7,9 +7,10 @@ interface Props {
   configRef: MutableRefObject<Config>;
   rendererRef: MutableRefObject<Renderer | null>;
   children?: ReactNode;
+  className?: string;
 }
 
-export function Stage({ configRef, rendererRef, children }: Props) {
+export function Stage({ configRef, rendererRef, children, className }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,8 +38,17 @@ export function Stage({ configRef, rendererRef, children }: Props) {
     };
   }, [configRef, rendererRef]);
 
+  // pointer events land on the wrap so mockup overlays do not block them
+  const onMove = (e: React.PointerEvent) => {
+    const r = rendererRef.current, c = canvasRef.current;
+    if (!r || !c) return;
+    const b = c.getBoundingClientRect();
+    r.setPointer((e.clientX - b.left) / b.width, (e.clientY - b.top) / b.height);
+  };
+  const onLeave = () => rendererRef.current?.setPointer(null);
+
   return (
-    <div className="stage-wrap">
+    <div className={"stage-wrap" + (className ? " " + className : "")} onPointerMove={onMove} onPointerLeave={onLeave}>
       <canvas ref={canvasRef} className="stage" aria-label="Light Rails pattern" />
       {error && <div className="stage-error">{error}</div>}
       {children}

@@ -140,7 +140,7 @@ export async function renderVideo(o: VideoOptions, onProgress: (p: number) => vo
     webm!.finalize(); return new Blob([webm!.target.buffer], { type: "video/webm" });
   } finally {
     try { encoder.close(); } catch { /* already closed */ }
-    renderer.dispose();
+    renderer.destroy();
   }
 }
 

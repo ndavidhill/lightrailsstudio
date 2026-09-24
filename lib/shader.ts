@@ -30,6 +30,11 @@ uniform float uSeamY, uSplitDepth, uPaint;
 uniform float uRunSpeed, uRunStretch, uRunSpread, uRunJitter, uHold;
 uniform float uPeriod, uLife;
 uniform float uAngle, uGrain, uGain, uBlur, uGlow, uBlow, uSway;
+uniform int   uMirror, uMirrorMode, uFadeSide;
+uniform float uFold, uSlices, uSliceShift, uFade;
+uniform float uTilt, uDepth, uCrease, uCreaseW;
+uniform vec2  uPointer;
+uniform float uPointerAmt, uPointerR;
 
 #define PI  3.14159265359
 #define TAU 6.28318530718
@@ -128,6 +133,22 @@ vec3 bind(vec2 p, out float wmul) {
   return useA > 0.5 ? vec3(tA, 0.0, mask) : vec3(tB, 0.5, mask);
 }
 
+/* ---- Curtain -------------------------------------------------------------
+   Rails hang straight away from the seam and flare out flat into it:
+   t = x * g(|y|) with g = tanh(|y| / k)^n, so g ~ 1 (parallel bars) past the
+   knee and a line of constant t runs off sideways as g falls to 0 at the seam.
+   Half a pitch of offset puts a rail, not a gap, on the centre line. */
+vec3 curtain(vec2 p) {
+  float seamP = 1.0 - 2.0 * uSeamY;
+  float ay  = abs(p.y - seamP);
+  float n   = mix(0.5, 2.0, uP1);                            // bend: how hard the knee turns
+  float k   = mix(0.05, 0.5, uP2);                           // flare: how far the knee reaches
+  float x   = p.x + (uP3 - 0.5) * ay;                        // lean
+  float g   = pow(tanh(ay / k), n);
+  float t   = x * g * 0.5 + 0.5 + 0.5 / uLines;
+  return vec3(t, ay + uTime * uP4 * 0.05, 1.0);
+}
+
 /* fan helper: rails converge on focus f, measured as angle around it */
 vec3 fan(vec2 p, vec2 f, float spread) {
   vec2 d = p - f;
@@ -146,6 +167,7 @@ vec3 shape(vec2 p, out float t2, out float wmul) {
   float tm = uTime;
 
   if (uShape == 24) return bind(p, wmul);
+  if (uShape == 25) return curtain(p);
 
   if (uShape == 0) {            // perspective fan
     p.x += p.y * (c - 0.5) * 0.8;
@@ -295,14 +317,48 @@ vec3 shape(vec2 p, out float t2, out float wmul) {
   return vec3(p.x * 0.5 + 0.5, p.y * 0.5 + 0.5, 1.0);
 }
 
-/* lit envelope for one rail at position u along it */
+/* quick rise, hold, fall over one cycle q in [0, 1) */
+float pulse(float q) {
+  return smoothstep(0.0, 0.12, q) * (1.0 - smoothstep(uLife * 0.7, 1.0, q));
+}
+
+/* lit envelope for one rail at position u along it. Every mode is periodic
+   in uPeriod so exported loops join. */
 float envelope(float u, float idx) {
   float off = idx * uRunSpread * 0.05 + hash(idx * 7.0) * uRunJitter * 0.5;
   float q = fract(uTime / uPeriod + off);
-  if (uMotion == 1) return 1.0;
-  if (uMotion == 0) {
-    // pulse: quick rise, hold, fall
-    return smoothstep(0.0, 0.12, q) * (1.0 - smoothstep(uLife * 0.7, 1.0, q));
+  if (uMotion == 1 || uMotion == 8) return 1.0;
+  if (uMotion == 0) return pulse(q);
+  if (uMotion == 3) {
+    // wave: a cosine rolling along the rail; lifetime widens the crest
+    float c = 0.5 + 0.5 * cos(TAU * (u * 2.0 - q));
+    return pow(c, mix(6.0, 0.6, uLife));
+  }
+  if (uMotion == 4) {
+    // cascade: the pulse starts on the centre rail and steps outward
+    float dist = abs(idx + 0.5 - uLines * 0.5) / max(uLines * 0.5, 1.0);
+    return pulse(fract(uTime / uPeriod - dist * 0.6 + hash(idx * 7.0) * uRunJitter * 0.1));
+  }
+  if (uMotion == 5) {
+    // comet: head sweeps along u; the tail falls off behind it and is gone
+    // (e^-4) by the time the cycle wraps
+    float L = 0.03 + uLife * 0.4;
+    float head = mix(-0.1, 1.1 + 4.0 * L, q);
+    float behind = head - u;
+    return behind >= 0.0 ? exp(-behind / L) : 1.0 - smoothstep(0.0, 0.02, -behind);
+  }
+  if (uMotion == 6) {
+    // flicker: four random on/off states per period, eased between
+    float f = q * 4.0;
+    float s0 = floor(f), s1 = mod(s0 + 1.0, 4.0);
+    float a = step(1.0 - uLife, hash(idx * 13.1 + s0 * 7.7));
+    float b = step(1.0 - uLife, hash(idx * 13.1 + s1 * 7.7));
+    return mix(a, b, smoothstep(0.7, 1.0, fract(f)));
+  }
+  if (uMotion == 7) {
+    // ripple: sharp bands travelling outward along u
+    float w = fract(u * 2.0 - q);
+    return smoothstep(0.0, 0.04, w) * (1.0 - smoothstep(uLife * 0.5, uLife * 0.5 + 0.08, w));
   }
   // trails: run in, hold, run out
   float H = uHold * 0.6;
@@ -315,20 +371,31 @@ float envelope(float u, float idx) {
   return smoothstep(tail, tail + soft, u) * (1.0 - smoothstep(head, head + soft, u));
 }
 
-/* halo, core, seam and glow profile for one rail family */
-void rail(float t, float u, float w, float side,
-          out float halo, out float core, out float glow, out float seam, out float env, out vec3 col) {
+/* halo, core, seam and glow profile for one rail family; shift offsets the
+   gradient phase (column slices), shade is the ribbon fold */
+void rail(float t, float u, float w, float side, float shift,
+          out float halo, out float core, out float glow, out float seam, out float env, out float shade, out vec3 col) {
   float s = t * uLines;
   float idx = floor(s);
-  float d = abs(fract(s) - 0.5) * 2.0;           // 0 at rail centre, 1 in the gap
+  if (uMotion == 8) {
+    // breathe: each rail swells and thins, staggered by run spread
+    w *= 0.7 + 0.5 * (0.5 + 0.5 * sin(TAU * (uTime / uPeriod + idx * uRunSpread * 0.05)));
+    w = min(w, 1.0);
+  }
+  float sd = fract(s) - 0.5;                     // signed position across the rail
+  float d = abs(sd) * 2.0;                       // 0 at rail centre, 1 in the gap
+  // fold: dark on one edge rising to a bright lip, then a hard break into the
+  // next ribbon, so neighbouring rails read as overlapping pleats
+  shade = mix(1.0, 0.4 + 0.8 * smoothstep(-0.5, 0.5, sd), uFold);
   halo = pow(max(0.0, 1.0 - d / w), uEdge);
   halo *= mix(1.0, smoothstep(0.0, w * 0.6, d), uHollow);
+  halo = mix(halo, 1.0 - smoothstep(w * 0.92, w + 0.04, d), uFold);   // a ribbon is solid across its width
   core = exp(-(d * d) / (w * w * 0.06));
   glow = exp(-(d * d) / (uBlur * uBlur * 1.6));
   seam = 1.0 - smoothstep(uSeamW * 0.6, uSeamW * 1.6, d);
   env = envelope(u, idx);
   float phase = uTime * uRunSpeed * 0.25 + idx * uRunSpread * 0.05 + hash(idx) * uRunJitter;
-  float x = u * uRunStretch * 2.0 - phase;
+  float x = u * uRunStretch * 2.0 - phase + shift;
   float pm = packMix(side, idx);
   col = pm <= 0.0 ? gradN(x, 0) : pm >= 1.0 ? gradN(x, 1) : mix(gradN(x, 0), gradN(x, 1), pm);
 }
@@ -337,31 +404,83 @@ void main() {
   vec2 frag = gl_FragCoord.xy;
   vec2 p = (frag - 0.5 * uRes) / uRes.y * 2.0;
   p += vec2(sin(uTime * 0.7), cos(uTime * 0.5)) * uSway;
-  float side = p.y - (1.0 - 2.0 * uSeamY);       // halves stay horizontal under rotation
+
+  // pointer: a magnifying bulge, so rails bend away from the cursor. The
+  // pull is proportional to distance, so it is smooth right under the cursor
+  vec2 dm = p - uPointer;
+  float near = uPointerAmt * exp(-dot(dm, dm) / (uPointerR * uPointerR));
+  p -= dm * near * 0.6;
+
+  // camera tilt: cast the screen point onto a plane pitched back by uTilt.
+  // At 0 degrees this is the identity; past the horizon there is only ground
+  float tiltMask = 1.0;
+  if (abs(uTilt) > 0.01) {
+    float a = radians(uTilt);
+    float f = 1.0 + uDepth * 4.0;
+    vec3 r  = vec3(p, f);
+    vec3 n  = vec3(0.0, sin(a), -cos(a));
+    float dn = dot(r, n);                          // < 0 in front of the camera
+    float s  = -f * cos(a) / min(dn, -1e-4);
+    vec3 hit = r * s - vec3(0.0, 0.0, f);
+    p = vec2(hit.x, dot(hit, vec3(0.0, cos(a), sin(a))));
+    tiltMask = smoothstep(0.0, 0.12, -dn / f);
+  }
+
+  float seamP = 1.0 - 2.0 * uSeamY;
+  float side = p.y - seamP;                      // halves stay horizontal under rotation
+  float seamDist = side;
+  // mirror before rotation so the fold sits on the seam; side is taken from
+  // the unfolded position so pack B still colours the reflected half
+  if (uMirror == 1) {
+    float dy = abs(p.y - seamP);
+    p.y = uMirrorMode == 1 ? seamP - dy : seamP + dy;
+    if (uMirrorMode == 2) p.x = abs(p.x);
+  }
   // the interleave / gradient band starts at the tunnel edge, not the seam
   float tunnelP = uShape == 24 ? uP4 * 0.45 : 0.0;
   side = sign(side) * max(abs(side) - tunnelP, 0.0);
   p = rot(radians(uAngle)) * p;
 
+  // column slices: screen-space strips, each shifting the gradient phase
+  float shift = 0.0;
+  if (uSlices >= 1.0) {
+    float cx = frag.x / uRes.x - 0.5;
+    float fx = (uMirror == 1 && uMirrorMode == 2) ? abs(cx) * 2.0 : cx + 0.5;
+    shift = (hash(floor(fx * uSlices) + 1.3) - 0.5) * uSliceShift;
+  }
+
   float t2, wmul;
   vec3 su = shape(p, t2, wmul);
-  float mask = su.z;
+  float mask = su.z * tiltMask;
   float w = min(uWidth * wmul, 1.0);
+  float railsPerPx = fwidth(su.x * uLines);
 
-  float halo, core, glow, seam, env; vec3 col;
-  rail(su.x, su.y, w, side, halo, core, glow, seam, env, col);
+  float halo, core, glow, seam, env, shade; vec3 col;
+  rail(su.x, su.y, w, side, shift, halo, core, glow, seam, env, shade, col);
 
   if (t2 >= 0.0) {
-    float h2, c2, g2, s2, e2; vec3 col2;
-    rail(t2, su.y, uWidth, side, h2, c2, g2, s2, e2, col2);
+    float h2, c2, g2, s2, e2, sh2; vec3 col2;
+    rail(t2, su.y, uWidth, side, shift, h2, c2, g2, s2, e2, sh2, col2);
     // union of both families, weighted by their envelopes
     float w1 = halo * env, w2 = h2 * e2;
     col = (w1 + w2) > 0.0 ? (col * w1 + col2 * w2) / (w1 + w2) : col;
+    shade = (w1 + w2) > 0.0 ? (shade * w1 + sh2 * w2) / (w1 + w2) : shade;
     halo = max(halo * env, h2 * e2); core = max(core * env, c2 * e2);
     glow = max(glow * env, g2 * e2); seam = max(seam * env, s2 * e2); env = 1.0;
   }
 
-  vec3 railCol = col * uGain;
+  // Curtain packs rails infinitely tight at the seam: once they are under a
+  // couple of pixels apart, settle each profile to its average so it does not alias
+  if (uShape == 25) {
+    float aa = smoothstep(0.35, 0.8, railsPerPx);
+    halo  = mix(halo, w / (uEdge + 1.0), aa);
+    core  = mix(core, 0.2 * w, aa);
+    glow  = mix(glow, 0.5, aa);
+    seam  = mix(seam, 0.0, aa);
+    shade = mix(shade, 1.0 - 0.3 * uFold, aa);
+  }
+
+  vec3 railCol = col * uGain * shade * (1.0 + near * 0.6);
   float e = env * mask;
   vec3 hot = mix(railCol, vec3(1.0), uBlow);
 
@@ -381,7 +500,112 @@ void main() {
   ink -= (ink - uBg) * seam * uSeam * core * e;
 
   vec3 c = mix(add, ink, uPaint);
+
+  // seam crease: a fine line along the seam in the gradient's seam colour
+  if (uCrease > 0.0) {
+    float cr = exp(-(seamDist * seamDist) / (uCreaseW * uCreaseW)) * uCrease * tiltMask;
+    vec3 cc = mix(gradN(shift - uTime * uRunSpeed * 0.25, 0) * uGain, vec3(1.0), 0.35 + 0.65 * uBlow);
+    c = mix(c, cc, clamp(cr, 0.0, 1.0));
+  }
+
+  // edge fade to the ground, baked in so exports keep the copy-safe area
+  if (uFade > 0.0) {
+    vec2 uv = frag / uRes;
+    float f;
+    if (uFadeSide == 0)      f = smoothstep(0.0, uFade, uv.x);
+    else if (uFadeSide == 1) f = smoothstep(0.0, uFade, 1.0 - uv.x);
+    else if (uFadeSide == 2) f = smoothstep(0.0, uFade * 0.5, min(uv.x, 1.0 - uv.x));
+    else                     f = 1.0 - smoothstep(1.0 - uFade, 1.25 - uFade * 0.5, length(uv - 0.5) * 1.414);
+    c = mix(uBg, c, f);
+  }
   c += (hash2(frag + fract(uTime) * 100.0) - 0.5) * uGrain;
+  outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}
+`;
+
+/* ---- post ---------------------------------------------------------------
+   The pattern renders into a float texture; these passes build bloom and
+   write the final frame. */
+
+/* dual-Kawase downsample. With uPrefilter set it reads the scene (crossfading
+   to scene B by uMix) and keeps only light above the ground and threshold. */
+export const DOWN_FRAG = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uSrc, uSrcB;
+uniform vec2  uTexel;       // 1 / source size
+uniform float uRadius, uMix, uThreshold;
+uniform int   uPrefilter;
+uniform vec3  uBg;
+uniform vec2  uRes;         // target size
+
+vec3 tap(vec2 uv) {
+  vec3 c = texture(uSrc, uv).rgb;
+  if (uPrefilter == 1) {
+    if (uMix > 0.0) c = mix(c, texture(uSrcB, uv).rgb, uMix);
+    c = max(c - uBg, 0.0);                         // light above the ground only
+    float br = max(c.r, max(c.g, c.b));
+    c *= smoothstep(uThreshold, uThreshold + 0.25, br);
+  }
+  return c;
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 h = uTexel * 0.5 * uRadius;
+  vec3 s = tap(uv) * 4.0;
+  s += tap(uv - h) + tap(uv + h);
+  s += tap(uv + vec2(h.x, -h.y)) + tap(uv - vec2(h.x, -h.y));
+  outColor = vec4(s / 8.0, 1.0);
+}
+`;
+
+/* dual-Kawase upsample */
+export const UP_FRAG = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uSrc;
+uniform vec2  uTexel;
+uniform float uRadius;
+uniform vec2  uRes;
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 h = uTexel * 0.5 * uRadius;
+  vec3 s = texture(uSrc, uv + vec2(-h.x * 2.0, 0.0)).rgb;
+  s += texture(uSrc, uv + vec2(-h.x, h.y)).rgb * 2.0;
+  s += texture(uSrc, uv + vec2(0.0, h.y * 2.0)).rgb;
+  s += texture(uSrc, uv + vec2(h.x, h.y)).rgb * 2.0;
+  s += texture(uSrc, uv + vec2(h.x * 2.0, 0.0)).rgb;
+  s += texture(uSrc, uv + vec2(h.x, -h.y)).rgb * 2.0;
+  s += texture(uSrc, uv + vec2(0.0, -h.y * 2.0)).rgb;
+  s += texture(uSrc, uv + vec2(-h.x, -h.y)).rgb * 2.0;
+  outColor = vec4(s / 12.0, 1.0);
+}
+`;
+
+/* final frame: scene A, crossfaded to B for a cross-shape morph, plus bloom,
+   then a triangular dither so smooth gradients do not band in 8-bit output */
+export const COMPOSITE_FRAG = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uA, uB, uBloomTex;
+uniform float uMix, uBloom, uTime;
+uniform int   uHasBloom;
+uniform vec2  uRes;
+
+float h(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec3 c = texture(uA, uv).rgb;
+  if (uMix > 0.0) c = mix(c, texture(uB, uv).rgb, uMix);
+  if (uHasBloom == 1) {
+    vec3 b = texture(uBloomTex, uv).rgb * uBloom;
+    c = 1.0 - (1.0 - c) * exp(-b * 1.5);           // screen-like: bright cores never clip hard
+  }
+  vec2 f = gl_FragCoord.xy + fract(uTime) * 61.0;
+  c += (h(f) + h(f + 17.3) - 1.0) / 255.0;
   outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }
 `;

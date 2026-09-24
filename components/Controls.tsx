@@ -1,14 +1,33 @@
 "use client";
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 
+const LS_COLLAPSED = "lightrails.collapsed";
+
+function readCollapsed(): string[] {
+  try { return JSON.parse(localStorage.getItem(LS_COLLAPSED) ?? "[]"); } catch { return []; }
+}
+
+/* a panel section; clicking the title folds it away, remembered per title */
 export function Section({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
+  const [closed, setClosed] = useState(false);
+  useEffect(() => { setClosed(readCollapsed().includes(title)); }, [title]);
+  const toggle = () => {
+    const next = !closed;
+    setClosed(next);
+    try {
+      const rest = readCollapsed().filter((t) => t !== title);
+      localStorage.setItem(LS_COLLAPSED, JSON.stringify(next ? [...rest, title] : rest));
+    } catch { /* storage blocked */ }
+  };
   return (
-    <div className="section">
+    <div className={"section" + (closed ? " folded" : "")}>
       <div className="section-head">
-        <span>{title}</span>
-        {action}
+        <button type="button" className="fold" aria-expanded={!closed} onClick={toggle}>
+          <span className="caret" aria-hidden>▾</span>{title}
+        </button>
+        {action && !closed && <span className="section-action">{action}</span>}
       </div>
-      {children}
+      {!closed && children}
     </div>
   );
 }
