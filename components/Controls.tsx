@@ -40,14 +40,16 @@ interface SliderProps {
   step: number;
   onChange: (v: number) => void;
   onCommit: () => void;
+  onReset?: () => void;
   fmt?: (v: number) => string;
 }
 
-export function Slider({ label, value, min, max, step, onChange, onCommit, fmt }: SliderProps) {
+export function Slider({ label, value, min, max, step, onChange, onCommit, onReset, fmt }: SliderProps) {
   const shown = fmt ? fmt(value) : step >= 1 ? String(Math.round(value)) : value.toFixed(step < 0.01 ? 3 : 2);
+  const pct = ((value - min) / (max - min)) * 100;
   return (
-    <div className="row">
-      <label title={label}>{label}</label>
+    <div className="row" onDoubleClick={onReset} title={onReset ? "Double-click to reset" : undefined}>
+      <label>{label}</label>
       <input
         type="range"
         min={min}
@@ -55,6 +57,7 @@ export function Slider({ label, value, min, max, step, onChange, onCommit, fmt }
         step={step}
         value={value}
         aria-label={label}
+        style={{ "--pct": `${Math.min(100, Math.max(0, pct))}%` } as React.CSSProperties}
         onChange={(e) => onChange(parseFloat(e.target.value))}
         onPointerUp={onCommit}
         onKeyUp={(e) => {
@@ -64,6 +67,19 @@ export function Slider({ label, value, min, max, step, onChange, onCommit, fmt }
       />
       <span className="val">{shown}</span>
     </div>
+  );
+}
+
+/* tucks less-used controls away behind a quiet toggle */
+export function More({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {open && children}
+      <button type="button" className="more" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {open ? "Less" : "More"}
+      </button>
+    </>
   );
 }
 

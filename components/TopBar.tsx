@@ -46,7 +46,6 @@ export function TopBar(p: Props) {
   return (
     <header className="topbar">
       <span className="tb-title">Light Rails</span>
-      <span className="tb-by">pattern studio</span>
       <div className="tb-group" role="group" aria-label="History">
         <button className="tb-icon" title="Undo (⌘Z)" aria-label="Undo" disabled={!p.canUndo} onClick={p.onUndo}>{Icon.undo}</button>
         <button className="tb-icon" title="Redo (⇧⌘Z)" aria-label="Redo" disabled={!p.canRedo} onClick={p.onRedo}>{Icon.redo}</button>

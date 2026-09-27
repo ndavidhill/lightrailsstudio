@@ -241,15 +241,15 @@ export function Studio() {
 
       <LeftPanel
         open={leftOpen} onClose={() => setLeftOpen(false)} config={config}
-        onTheme={useTheme} onTemplate={useTemplate}
+        onTemplate={useTemplate}
         presets={presets}
         onSavePreset={(name) => savePresets([...presets, { name, cfg: cloneConfig(config) }])}
         onLoadPreset={(p) => { const c = coerceConfig(p.cfg); if (c) apply(c); }}
         onDeletePreset={(i) => savePresets(presets.filter((_, j) => j !== i))}
       />
-      <RightPanel open={rightOpen} onClose={() => setRightOpen(false)} config={config} set={patch} commit={commitNow} apply={applyPatch} />
-      {!leftOpen && <button className="reveal reveal-left" title="show panel (H)" onClick={() => setLeftOpen(true)}>Colour</button>}
-      {!rightOpen && <button className="reveal reveal-right" title="show panel (H)" onClick={() => setRightOpen(true)}>Rails</button>}
+      <RightPanel open={rightOpen} onClose={() => setRightOpen(false)} config={config} set={patch} commit={commitNow} apply={applyPatch} onTheme={useTheme} />
+      {!leftOpen && <button className="reveal reveal-left" title="show panel (H)" onClick={() => setLeftOpen(true)}>Library</button>}
+      {!rightOpen && <button className="reveal reveal-right" title="show panel (H)" onClick={() => setRightOpen(true)}>Controls</button>}
 
       <SceneBar scene={scene} onScene={(id) => { setScene(id); setSceneKey((k) => k + 1); }} uiOn={uiOn} onUi={setUiOn} reel={reel} onReel={() => setReel((r) => !r)} />
       <Toast toast={toast} />

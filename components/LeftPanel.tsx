@@ -9,7 +9,6 @@ interface Props {
   open: boolean;
   onClose: () => void;
   config: Config;
-  onTheme: (i: number) => void;
   onTemplate: (t: Template) => void;
   presets: Preset[];
   onSavePreset: (name: string) => void;
@@ -23,25 +22,14 @@ function swatch(stops: string[]) {
 
 export function LeftPanel(p: Props) {
   const [name, setName] = useState("");
-  const themeOn = THEMES.findIndex((t) => t.stops.join() === p.config.stops.join() && t.bg === p.config.bg);
   const save = () => {
     const n = name.trim() || `preset ${p.presets.length + 1}`;
     p.onSavePreset(n);
     setName("");
   };
   return (
-    <aside className={"pane pane-left" + (p.open ? "" : " closed")} aria-label="Colour and templates" aria-hidden={!p.open}>
-      <div className="pane-bar"><b>Colour</b><span className="sp" /><button className="x" title="hide panel (H)" aria-label="Hide colour panel" onClick={p.onClose}>×</button></div>
-
-      <Section title="Theme presets">
-        <div className="orbs">
-          {THEMES.map((t, i) => (
-            <button key={t.name} className={"orb" + (i === themeOn ? " on" : "")} title={t.name} aria-label={t.name}
-              style={{ background: t.stopsB ? `linear-gradient(180deg, ${t.stops[0]} 0 50%, ${t.stopsB[0]} 50% 100%)` : swatch(t.stops) }}
-              onClick={() => p.onTheme(i)} />
-          ))}
-        </div>
-      </Section>
+    <aside className={"pane pane-left" + (p.open ? "" : " closed")} aria-label="Library" aria-hidden={!p.open}>
+      <div className="pane-bar"><b>Library</b><span className="sp" /><button className="x" title="Hide panel (H)" aria-label="Hide library" onClick={p.onClose}>×</button></div>
 
       <Section title="Templates">
         <div className="chips">
@@ -49,7 +37,7 @@ export function LeftPanel(p: Props) {
             const on = p.config.shape === t.cfg.shape && (!t.cfg.stops || t.cfg.stops.join() === p.config.stops.join());
             return (
               <button key={t.name} className={"chip" + (on ? " on" : "")} title={t.title} onClick={() => p.onTemplate(t)}>
-                <span className="swatch" style={{ background: swatch(t.cfg.stops ?? THEMES[0].stops) }} />
+                <span className="swatch" style={{ background: swatch(t.cfg.stops ?? THEMES[0].stops), boxShadow: `inset 0 0 0 1px rgba(0,0,0,.06), inset 0 -10px 0 ${t.cfg.bg ?? THEMES[0].bg}` }} />
                 <span className="name">{t.name}</span>
               </button>
             );
@@ -59,11 +47,11 @@ export function LeftPanel(p: Props) {
 
       <Section title="My presets">
         <div className="save-row">
-          <input type="text" placeholder="name this look" value={name} aria-label="Preset name"
+          <input type="text" placeholder="Name this look" value={name} aria-label="Preset name"
             onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
           <button className="btn" onClick={save}>Save</button>
         </div>
-        {p.presets.length === 0 && <div className="hint">Saved looks live in this browser.</div>}
+        {p.presets.length === 0 && <div className="hint">Saved in this browser.</div>}
         {p.presets.map((pr, i) => (
           <div className="preset-row" key={pr.name + i}>
             <button className="name" onClick={() => p.onLoadPreset(pr)}>{pr.name}</button>
